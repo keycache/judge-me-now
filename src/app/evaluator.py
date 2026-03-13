@@ -36,10 +36,9 @@ def evaluate_candidate_response(
     Evaluate their performance strictly based on the rubric provided in your system instructions.
 
     Ensure your output is a valid JSON object matching the Evaluation schema:
-    - score (integer 1-10)
-    - feedback (string)
-    - gaps_identified (list of strings)
-    - model_answer (string)
+    {Evaluation.model_json_schema()}
+
+    Do not include $defs $schema or any extra keys. Return only the JSON object with the evaluation results.
     """
 
     # Initialize the client with the dynamic API key

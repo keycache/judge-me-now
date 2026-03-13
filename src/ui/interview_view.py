@@ -8,7 +8,7 @@ import streamlit as st
 from gtts import gTTS
 
 from src.app.evaluator import evaluate_candidate_response
-from src.app.schemas.interview import Answer
+from src.app.schemas.interview import Answer, Evaluation, Question
 from src.app.session_manager import SessionManager
 from src.ui.constants import (
     MSG_NO_API_KEY,
@@ -88,7 +88,7 @@ def render_interview_view():
             st.rerun()
 
     # Determine which question is currently active
-    current_question = st.session_state.get(
+    current_question: Question = st.session_state.get(
         STATE_CURRENT_QUESTION, question_options[selected_q_label]
     )
 
@@ -116,9 +116,9 @@ def render_interview_view():
     # 5. Text-to-Speech (TTS)
     # We generate the audio buffer and use st.audio to play it.
     # autoplay=True is supported in Streamlit >= 1.33
-    with st.spinner("Generating audio..."):
-        tts_buffer = _generate_tts_audio(current_question.value)
-        st.audio(tts_buffer, format="audio/mp3", autoplay=True)
+    # with st.spinner("Generating audio..."):
+    #     tts_buffer = _generate_tts_audio(current_question.value)
+    #     st.audio(tts_buffer, format="audio/mp3", autoplay=False)
 
     st.divider()
 
@@ -129,14 +129,25 @@ def render_interview_view():
     if current_question.answers:
         st.markdown("#### Past Answers")
         for ans in sorted(current_question.answers, key=lambda a: a.timestamp):
-            st.caption(f"Recorded at {ans.timestamp}")
-            try:
-                audio_path = Path(ans.audio_file_path)
-                with audio_path.open("rb") as f:
-                    guessed_mime, _ = mimetypes.guess_type(audio_path)
-                    st.audio(f.read(), format=guessed_mime or "audio/wav")
-            except FileNotFoundError:
-                st.warning(f"Audio file missing: {ans.audio_file_path}")
+            st.divider()
+            col1, col2 = st.columns(2)
+            with col1:
+                st.caption(f"Recorded at {ans.timestamp}")
+                try:
+                    audio_path = Path(ans.audio_file_path)
+                    with audio_path.open("rb") as f:
+                        guessed_mime, _ = mimetypes.guess_type(audio_path)
+                        st.audio(f.read(), format=guessed_mime or "audio/wav")
+                except FileNotFoundError:
+                    st.warning(f"Audio file missing: {ans.audio_file_path}")
+            with col2:
+                transcription = (
+                    f"`{ans.evaluation.candidate_answer}`"
+                    if ans.evaluation
+                    else "Transcription not available"
+                )
+                st.write(transcription)
+
         st.divider()
 
     # We use the question's text hash as a key so the audio input resets for new questions
@@ -161,7 +172,7 @@ def render_interview_view():
                         f"Captured audio: {len(audio_bytes)/1024:.1f} KB ({audio_mime})"
                     )
 
-                    # Persist audio to disk and attach to the question
+                    # Persist audio to disk
                     audio_path = SessionManager.save_answer_audio(
                         session_id=session_id,
                         question=current_question,
@@ -169,9 +180,17 @@ def render_interview_view():
                         mime_type=audio_mime,
                     )
 
+                    evaluation = evaluate_candidate_response(
+                        audio_bytes=audio_bytes,
+                        mime_type=audio_mime,
+                        question=current_question,
+                        api_key=st.session_state[STATE_API_KEY],
+                    )
+
                     new_answer = Answer(
                         audio_file_path=audio_path,
                         timestamp=datetime.now(timezone.utc).isoformat(),
+                        evaluation=evaluation,
                     )
 
                     updated_answers = list(current_question.answers or [])
@@ -192,20 +211,13 @@ def render_interview_view():
                     st.session_state[STATE_CURRENT_QUESTION] = updated_question
                     current_question = updated_question
                     questions = updated_questions
-
-                    evaluation = evaluate_candidate_response(
-                        audio_bytes=audio_bytes,
-                        mime_type=audio_mime,
-                        question=current_question,
-                        api_key=st.session_state[STATE_API_KEY],
-                    )
                     st.session_state[STATE_EVALUATION] = evaluation
                 except Exception as e:
                     st.error(f"Evaluation failed: {e}")
 
     # 7. Display Evaluation Results
     if STATE_EVALUATION in st.session_state:
-        evaluation = st.session_state[STATE_EVALUATION]
+        evaluation: Evaluation = st.session_state[STATE_EVALUATION]
         st.divider()
         st.header("📊 Evaluation Results")
 

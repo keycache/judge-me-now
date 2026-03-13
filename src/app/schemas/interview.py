@@ -10,6 +10,29 @@ class Difficulty(str, Enum):
     HARD = "Hard"
 
 
+class Evaluation(BaseModel):
+    score: int = Field(
+        ...,
+        description="Score out of 10 based on the candidate's accuracy, completeness, and communication",
+    )
+    candidate_answer: str = Field(
+        ...,
+        description="A text transcription of the candidate's spoken answer for reference",
+    )
+    feedback: str = Field(
+        ...,
+        description="Detailed, constructive feedback on the candidate's audio response",
+    )
+    gaps_identified: List[str] = Field(
+        ...,
+        description="Specific knowledge gaps, missing edge cases, or incorrect statements in the response",
+    )
+    model_answer: str = Field(
+        ...,
+        description="How the ideal answer should have been structured and explained",
+    )
+
+
 class Answer(BaseModel):
     audio_file_path: str = Field(
         ...,
@@ -18,6 +41,10 @@ class Answer(BaseModel):
     timestamp: str = Field(
         ...,
         description="The ISO 8601 timestamp of when the answer was submitted",
+    )
+    evaluation: Optional[Evaluation] = Field(
+        None,
+        description="The evaluation of the candidate's answer (populated after evaluation)",
     )
 
 
@@ -45,23 +72,4 @@ class QuestionList(BaseModel):
 
     questions: List[Question] = Field(
         ..., description="List of generated interview questions"
-    )
-
-
-class Evaluation(BaseModel):
-    score: int = Field(
-        ...,
-        description="Score out of 10 based on the candidate's accuracy, completeness, and communication",
-    )
-    feedback: str = Field(
-        ...,
-        description="Detailed, constructive feedback on the candidate's audio response",
-    )
-    gaps_identified: List[str] = Field(
-        ...,
-        description="Specific knowledge gaps, missing edge cases, or incorrect statements in the response",
-    )
-    model_answer: str = Field(
-        ...,
-        description="How the ideal answer should have been structured and explained",
     )
