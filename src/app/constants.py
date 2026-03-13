@@ -10,7 +10,7 @@ class Model:
 # --- File Paths ---
 # Assuming this file is located at src/app/constants.py
 SRC_DIR = Path(__file__).parent.parent
-DATA_DIR = SRC_DIR / "data"
+DATA_DIR = Path(".data")
 SESSIONS_DIR = DATA_DIR / "sessions"
 
 # --- System Prompts ---
