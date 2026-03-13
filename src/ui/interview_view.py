@@ -104,6 +104,7 @@ def render_interview_view():
         selected_q_label = st.selectbox(
             "Select a question:", options=list(question_options.keys()), index=0
         )
+        st.session_state[STATE_CURRENT_QUESTION] = question_options[selected_q_label]
 
     with col2:
         st.write("")  # Spacing
@@ -126,6 +127,7 @@ def render_interview_view():
         and STATE_CURRENT_QUESTION not in st.session_state
     ):
         current_question = question_options[selected_q_label]
+        st.session_state[STATE_CURRENT_QUESTION] = current_question
 
     # Clear evaluation if the question changes
     if (
