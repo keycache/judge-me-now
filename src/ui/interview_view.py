@@ -21,6 +21,34 @@ from src.ui.constants import (
 )
 
 
+def _render_evaluation(evaluation: Evaluation, timestamp: str, height="content"):
+    with st.container(height=height):
+        if evaluation:
+            with st.container(
+                horizontal=True,
+                horizontal_alignment="distribute",
+                vertical_alignment="bottom",
+            ):
+                st.write(f"**Score:** {evaluation.score}/10")
+                selection = st.segmented_control(
+                    " ",
+                    options=["Feedback", "Gaps", "Ideal Answer"],
+                    key=f"eval_view_{timestamp}",
+                    default="Feedback",
+                )
+            if selection == "Feedback":
+                st.info(evaluation.feedback)
+            elif selection == "Gaps":
+                if evaluation.gaps_identified:
+                    st.markdown(
+                        "\n".join([f"- {gap}" for gap in evaluation.gaps_identified])
+                    )
+                else:
+                    st.success("No major knowledge gaps identified!")
+            elif selection == "Ideal Answer":
+                st.write(evaluation.model_answer)
+
+
 def _generate_tts_audio(text: str) -> io.BytesIO:
     """Converts text to speech using gTTS and returns an in-memory byte buffer."""
     tts = gTTS(text=text, lang="en", slow=False)
@@ -111,7 +139,7 @@ def render_interview_view():
     st.markdown(
         f"**Category:** `{', '.join(current_question.category)}` | **Difficulty:** `{current_question.difficulty.value}`"
     )
-    st.subheader(current_question.value)
+    st.subheader(f"Question: {current_question.value}")
 
     # 5. Text-to-Speech (TTS)
     # We generate the audio buffer and use st.audio to play it.
@@ -123,124 +151,125 @@ def render_interview_view():
     st.divider()
 
     # 6. Audio Recording & Submission
-    st.write("### Your Answer")
-
-    # Past answers playback
-    if current_question.answers:
-        st.markdown("#### Past Answers")
-        for ans in sorted(current_question.answers, key=lambda a: a.timestamp):
-            st.divider()
-            col1, col2 = st.columns(2)
-            with col1:
-                st.caption(f"Recorded at {ans.timestamp}")
-                try:
-                    audio_path = Path(ans.audio_file_path)
-                    with audio_path.open("rb") as f:
-                        guessed_mime, _ = mimetypes.guess_type(audio_path)
-                        st.audio(f.read(), format=guessed_mime or "audio/wav")
-                except FileNotFoundError:
-                    st.warning(f"Audio file missing: {ans.audio_file_path}")
-            with col2:
-                transcription = (
-                    f"`{ans.evaluation.candidate_answer}`"
-                    if ans.evaluation
-                    else "Transcription not available"
-                )
-                st.write(transcription)
-
-        st.divider()
+    # st.write("### Your Answer")
 
     # We use the question's text hash as a key so the audio input resets for new questions
-    audio_data = st.audio_input(
-        "Record your answer", key=f"audio_{hash(current_question.value)}"
-    )
+    with st.container(
+        horizontal=True, horizontal_alignment="distribute", vertical_alignment="center"
+    ):
+        audio_data = st.audio_input(
+            "Record your answer", key=f"audio_{hash(current_question.value)}"
+        )
+        new_answer = None
+        if st.button("Submit Answer", type="primary", disabled=audio_data is None):
+            try:
+                audio_bytes = audio_data.read()
+                audio_mime = audio_data.type or "audio/wav"
 
-    if audio_data is not None:
-        if st.button("Submit Answer", type="primary", use_container_width=True):
-            with st.spinner("Analyzing your response..."):
-                try:
-                    audio_bytes = audio_data.read()
-                    audio_mime = audio_data.type or "audio/wav"
-
-                    if not audio_bytes:
-                        st.error(
-                            "Captured audio is empty. Please re-record and submit."
-                        )
-                        return
-
-                    st.caption(
-                        f"Captured audio: {len(audio_bytes)/1024:.1f} KB ({audio_mime})"
+                if not audio_bytes:
+                    st.toast(
+                        "Captured audio is empty. Please re-record and submit.",
+                        duration="infinite",
+                        icon="⚠️",
                     )
+                    return
 
-                    # Persist audio to disk
-                    audio_path = SessionManager.save_answer_audio(
-                        session_id=session_id,
-                        question=current_question,
-                        audio_bytes=audio_bytes,
-                        mime_type=audio_mime,
-                    )
+                st.toast(
+                    f"Captured audio: {len(audio_bytes)/1024:.1f} KB ({audio_mime})",
+                    duration="long",
+                    icon="ℹ️",
+                )
 
-                    evaluation = evaluate_candidate_response(
-                        audio_bytes=audio_bytes,
-                        mime_type=audio_mime,
-                        question=current_question,
-                        api_key=st.session_state[STATE_API_KEY],
-                    )
+                # Persist audio to disk
+                audio_path = SessionManager.save_answer_audio(
+                    session_id=session_id,
+                    question=current_question,
+                    audio_bytes=audio_bytes,
+                    mime_type=audio_mime,
+                )
 
-                    new_answer = Answer(
-                        audio_file_path=audio_path,
-                        timestamp=datetime.now(timezone.utc).isoformat(),
-                        evaluation=evaluation,
-                    )
+                evaluation = evaluate_candidate_response(
+                    audio_bytes=audio_bytes,
+                    mime_type=audio_mime,
+                    question=current_question,
+                    api_key=st.session_state[STATE_API_KEY],
+                )
 
-                    updated_answers = list(current_question.answers or [])
-                    updated_answers.append(new_answer)
-                    updated_question = current_question.model_copy(
-                        update={"answers": updated_answers}
-                    )
+                new_answer = Answer(
+                    audio_file_path=audio_path,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    evaluation=evaluation,
+                )
 
-                    updated_questions = []
-                    for q in questions:
-                        if q.value == current_question.value:
-                            updated_questions.append(updated_question)
-                        else:
-                            updated_questions.append(q)
+                updated_answers = list(current_question.answers or [])
+                updated_answers.append(new_answer)
+                updated_question = current_question.model_copy(
+                    update={"answers": updated_answers}
+                )
 
-                    SessionManager.save_questions(session_id, updated_questions)
-                    st.session_state[STATE_QUESTIONS] = updated_questions
-                    st.session_state[STATE_CURRENT_QUESTION] = updated_question
-                    current_question = updated_question
-                    questions = updated_questions
-                    st.session_state[STATE_EVALUATION] = evaluation
-                except Exception as e:
-                    st.error(f"Evaluation failed: {e}")
+                updated_questions = []
+                for q in questions:
+                    if q.value == current_question.value:
+                        updated_questions.append(updated_question)
+                    else:
+                        updated_questions.append(q)
+
+                SessionManager.save_questions(session_id, updated_questions)
+                st.session_state[STATE_QUESTIONS] = updated_questions
+                st.session_state[STATE_CURRENT_QUESTION] = updated_question
+                current_question = updated_question
+                questions = updated_questions
+                st.session_state[STATE_EVALUATION] = evaluation
+            except Exception as e:
+                st.toast("Evaluation failed", duration="long", icon="⚠️")
+                print(f"Error during evaluation: {e}")
 
     # 7. Display Evaluation Results
     if STATE_EVALUATION in st.session_state:
         evaluation: Evaluation = st.session_state[STATE_EVALUATION]
         st.divider()
-        st.header("📊 Evaluation Results")
+        with st.expander("Open to see **Evaluation Results**", expanded=False):
+            _render_evaluation(
+                evaluation, timestamp="evaluation_timestamp", height="content"
+            )
+    else:
+        st.info("Record and submit your answer to see the evaluation results here.")
 
-        # Score
-        score_color = (
-            "green"
-            if evaluation.score >= 8
-            else "orange" if evaluation.score >= 5 else "red"
-        )
-        st.markdown(f"### Score: :{score_color}[{evaluation.score}/10]")
+    # Past answers playback
+    if current_question.answers:
+        height_per_answer = 350
+        with st.expander(
+            f"📁 Past Answers ({len(current_question.answers)})", expanded=False
+        ):
+            for ans in sorted(current_question.answers, key=lambda a: a.timestamp):
+                st.divider()
+                col1, col2 = st.columns(2)
+                with col1:
+                    with st.container(height=height_per_answer):
+                        st.caption(f"Recorded at {ans.timestamp}")
+                        try:
+                            audio_path = Path(ans.audio_file_path)
+                            with audio_path.open("rb") as f:
+                                guessed_mime, _ = mimetypes.guess_type(audio_path)
+                                st.audio(f.read(), format=guessed_mime or "audio/wav")
+                            transcription = (
+                                f"`{ans.evaluation.candidate_answer}`"
+                                if ans.evaluation
+                                else "Transcription not available"
+                            )
+                            st.write(transcription)
+                        except FileNotFoundError:
+                            st.warning(f"Audio file missing: {ans.audio_file_path}")
+                with col2:
+                    (
+                        _render_evaluation(
+                            ans.evaluation,
+                            timestamp=ans.timestamp,
+                            height=height_per_answer,
+                        )
+                        if ans.evaluation
+                        else st.info("Evaluation not available for this answer yet.")
+                    )
 
-        # Feedback
-        st.markdown("#### Feedback")
-        st.info(evaluation.feedback)
-
-        # Gaps
-        st.markdown("#### Identified Gaps")
-        if evaluation.gaps_identified:
-            for gap in evaluation.gaps_identified:
-                st.warning(f"• {gap}")
-        else:
-            st.success("No major knowledge gaps identified!")
-
-        # Ideal Answer
-        with st.expander("Show Ideal Model Answer"):
-            st.write(evaluation.model_answer)
+            st.divider()
+            st.divider()
