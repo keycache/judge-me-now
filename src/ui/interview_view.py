@@ -272,4 +272,3 @@ def render_interview_view():
                     )
 
             st.divider()
-            st.divider()
